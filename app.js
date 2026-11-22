@@ -393,17 +393,77 @@ function updateLoop() {
   if (ui.audio.ended) { playing = false; status('Recitation finished.'); ui.play.disabled = false; ui.pause.disabled = true; return; }
   animationFrame = requestAnimationFrame(updateLoop);
 }
-async function playAt(position) {
-  if (!segments.length) { status('Load a surah first.'); return; }
-  cancelAnimationFrame(animationFrame); clearHighlight();
-  try {
-    ui.audio.currentTime = Math.max(0, position / 1000);
-    await ui.audio.play();
-    playing = true; paused = false;
-    ui.play.disabled = true; ui.pause.disabled = false; ui.pause.textContent = '❚❚ Pause';
-    status('Playing…'); updateLoop();
-  } catch (error) { status(`Playback could not start: ${error.message}`); }
+
+async function seekAudio(position) {
+  const target = Math.max(0, position / 1000);
+
+  if (Math.abs(ui.audio.currentTime - target) < 0.05 && !ui.audio.seeking) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timeout);
+      ui.audio.removeEventListener('seeked', onSeeked);
+      ui.audio.removeEventListener('error', onError);
+    };
+
+    const onSeeked = () => {
+      if (!ui.audio.seeking) {
+        cleanup();
+        resolve();
+      }
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error('Audio seeking failed.'));
+    };
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Audio seeking timed out.'));
+    }, 5000);
+
+    ui.audio.addEventListener('seeked', onSeeked);
+    ui.audio.addEventListener('error', onError);
+
+    ui.audio.currentTime = target;
+
+    if (!ui.audio.seeking &&
+        Math.abs(ui.audio.currentTime - target) < 0.05) {
+      cleanup();
+      resolve();
+    }
+  });
 }
+
+async function playAt(position) {
+  if (!segments.length) {
+    status('Load a surah first.');
+    return;
+  }
+
+  cancelAnimationFrame(animationFrame);
+  clearHighlight();
+
+  try {
+    await seekAudio(position);
+    await ui.audio.play();
+
+    playing = true;
+    paused = false;
+    ui.play.disabled = true;
+    ui.pause.disabled = false;
+    ui.pause.textContent = '❚❚ Pause';
+
+    status('Playing…');
+    updateLoop();
+  } catch (error) {
+    status(`Playback could not start: ${error.message}`);
+  }
+}
+
 function play() {
   const ayah = Number(ui.ayah.value);
   if (!Number.isInteger(ayah) || ayah < 1) { status('Enter a valid positive ayah number.'); return; }
