@@ -505,6 +505,7 @@ async function loadSurah() {
   }
 
   const task = (async () => {
+    previewToken++;
     stopPlayback();
 
     setControlsReady(false);
@@ -1032,12 +1033,37 @@ ui.reciter.addEventListener('change', () => {
   }
 });
 
+let previewToken = 0;
+
+async function showText(chapter) {
+  const token = ++previewToken;
+
+  try {
+    const text = await loadText(chapter);
+    if (token !== previewToken) return;
+
+    renderText(text);
+    ui.loaded.textContent = SURAH_NAMES[chapter - 1];
+    status('Press Play to load audio and timings.');
+  } catch (error) {
+    if (token === previewToken) status(error.message);
+  }
+}
+
 ui.surah.addEventListener('change', () => {
   stopPlayback();
 
-  if (loadedChapter !== null) {
-    status('Surah selected. Press Play to load it.');
-  }
+  loadedChapter = null;
+  loadedReciterSlug = null;
+  segments = [];
+  segmentStarts = [];
+  ayahStarts = [];
+  lastWord = null;
+
+  setControlsReady(false);
+  updateJumpButton();
+
+  showText(Number(ui.surah.value));
 });
 
 ui.play.addEventListener('click', play);
@@ -1065,4 +1091,5 @@ ui.audio.addEventListener('ended', () => {
 // Initial setup.
 
 setControlsReady(false);
+showText(Number(ui.surah.value));
 refreshReciters();
