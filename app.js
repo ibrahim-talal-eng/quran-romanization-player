@@ -611,6 +611,31 @@ function findSegmentIndex(position) {
   return low - 1;
 }
 
+function scrollToWord(word) {
+  const margin = 70;
+  const style = getComputedStyle(ui.reader);
+  const scrollable =
+    /(auto|scroll)/.test(style.overflowY) &&
+    ui.reader.scrollHeight > ui.reader.clientHeight + 1;
+
+  const rect = word.getBoundingClientRect();
+
+  if (scrollable) {
+    const readerRect = ui.reader.getBoundingClientRect();
+
+    if (rect.top < readerRect.top + margin) {
+      ui.reader.scrollTop -= readerRect.top + margin - rect.top;
+    } else if (rect.bottom > readerRect.bottom - margin) {
+      ui.reader.scrollTop += rect.bottom - (readerRect.bottom - margin);
+    }
+  } else if (rect.top < margin || rect.bottom > window.innerHeight - margin) {
+    window.scrollBy({
+      top: rect.top - window.innerHeight / 2 + rect.height / 2,
+      behavior: 'smooth'
+    });
+  }
+}
+
 function applyHighlight(position) {
   const index = findSegmentIndex(position);
 
@@ -630,18 +655,7 @@ function applyHighlight(position) {
 
   currentWord.classList.add('active');
 
-  if (playing) {
-    const rect = currentWord.getBoundingClientRect();
-    const readerRect = ui.reader.getBoundingClientRect();
-
-    const margin = 70;
-
-    if (rect.top < readerRect.top + margin) {
-      ui.reader.scrollTop -= readerRect.top + margin - rect.top;
-    } else if (rect.bottom > readerRect.bottom - margin) {
-      ui.reader.scrollTop += rect.bottom - (readerRect.bottom - margin);
-    }
-  }
+  if (playing) scrollToWord(currentWord);
 }
 
 function clearHighlight() {
