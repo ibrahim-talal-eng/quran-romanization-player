@@ -611,31 +611,6 @@ function findSegmentIndex(position) {
   return low - 1;
 }
 
-function scrollToWord(word) {
-  const margin = 70;
-  const style = getComputedStyle(ui.reader);
-  const scrollable =
-    /(auto|scroll)/.test(style.overflowY) &&
-    ui.reader.scrollHeight > ui.reader.clientHeight + 1;
-
-  const rect = word.getBoundingClientRect();
-
-  if (scrollable) {
-    const readerRect = ui.reader.getBoundingClientRect();
-
-    if (rect.top < readerRect.top + margin) {
-      ui.reader.scrollTop -= readerRect.top + margin - rect.top;
-    } else if (rect.bottom > readerRect.bottom - margin) {
-      ui.reader.scrollTop += rect.bottom - (readerRect.bottom - margin);
-    }
-  } else if (rect.top < margin || rect.bottom > window.innerHeight - margin) {
-    window.scrollBy({
-      top: rect.top - window.innerHeight / 2 + rect.height / 2,
-      behavior: 'smooth'
-    });
-  }
-}
-
 function applyHighlight(position) {
   const index = findSegmentIndex(position);
 
@@ -654,14 +629,105 @@ function applyHighlight(position) {
   if (!currentWord) return;
 
   currentWord.classList.add('active');
+  lastWord = currentWord;
 
-  if (playing) scrollToWord(currentWord);
+  if (playing && autoScroll) {
+    scrollToWord(currentWord, currentWord.dataset.wordIndex === '1');
+  } else {
+    updateJumpButton();
+  }
 }
 
 function clearHighlight() {
   currentWord?.classList.remove('active');
   currentWord = null;
 }
+
+const AUTO_SCROLL_THRESHOLD = 0.25;
+let autoScroll = true;
+let lastWord = null;
+
+const jumpButton = document.createElement('button');
+jumpButton.id = 'jump-to-word';
+jumpButton.type = 'button';
+jumpButton.hidden = true;
+document.body.append(jumpButton);
+
+function getScrollContext() {
+  const style = getComputedStyle(ui.reader);
+  const scrollable =
+    /(auto|scroll)/.test(style.overflowY) &&
+    ui.reader.scrollHeight > ui.reader.clientHeight + 1;
+
+  if (scrollable) {
+    const rect = ui.reader.getBoundingClientRect();
+    return {
+      top: rect.top,
+      height: rect.height,
+      scrollBy: top => ui.reader.scrollBy({ top, behavior: 'smooth' })
+    };
+  }
+
+  return {
+    top: 0,
+    height: window.innerHeight,
+    scrollBy: top => window.scrollBy({ top, behavior: 'smooth' })
+  };
+}
+
+function wordOffset(word) {
+  const context = getScrollContext();
+  const rect = word.getBoundingClientRect();
+  const delta = rect.top + rect.height / 2 - (context.top + context.height / 2);
+  return { context, delta };
+}
+
+function scrollToWord(word, force) {
+  const { context, delta } = wordOffset(word);
+
+  if (force || Math.abs(delta) > context.height * AUTO_SCROLL_THRESHOLD) {
+    context.scrollBy(delta);
+  }
+}
+
+function updateJumpButton() {
+  if (autoScroll || !lastWord || (!playing && !paused)) {
+    jumpButton.hidden = true;
+    return;
+  }
+
+  const { delta } = wordOffset(lastWord);
+  jumpButton.textContent = `${delta < 0 ? '↑' : '↓'} Current word`;
+  jumpButton.hidden = false;
+}
+
+function suspendAutoScroll() {
+  if (!playing && !paused) return;
+  autoScroll = false;
+  updateJumpButton();
+}
+
+function resumeAutoScroll() {
+  autoScroll = true;
+  if (lastWord) scrollToWord(lastWord, true);
+  updateJumpButton();
+}
+
+jumpButton.addEventListener('click', resumeAutoScroll);
+
+window.addEventListener('wheel', suspendAutoScroll, { passive: true });
+window.addEventListener('touchmove', suspendAutoScroll, { passive: true });
+window.addEventListener('keydown', event => {
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
+  if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
+    suspendAutoScroll();
+  }
+});
+ui.reader.addEventListener('pointerdown', event => {
+  if (event.target === ui.reader) suspendAutoScroll();
+});
+ui.reader.addEventListener('scroll', updateJumpButton, { passive: true });
+window.addEventListener('scroll', updateJumpButton, { passive: true });
 
 function currentPosition() {
   return ui.audio.currentTime * 1000;
@@ -740,6 +806,8 @@ async function playAt(position) {
 
   cancelAnimationFrame(animationFrame);
   clearHighlight();
+  autoScroll = true;
+  updateJumpButton();
 
   try {
     await seekAudio(position);
@@ -842,6 +910,9 @@ function stopPlayback() {
   paused = false;
 
   clearHighlight();
+  autoScroll = true;
+  lastWord = null;
+  updateJumpButton();
 
   ui.play.disabled = !ui.reciter.value;
   ui.pause.disabled = true;
